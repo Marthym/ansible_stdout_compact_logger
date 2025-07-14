@@ -259,6 +259,13 @@ class CallbackModule(CallbackBase):
         return "%s | %s | %s | rc=%s" % (hostname, caption, duration, result.get('rc', 0))
 
     def v2_playbook_on_task_start(self, task, is_conditional):
+        if hasattr(self, 'is_flush_handlers') and self.is_flush_handlers:
+            duration = self._get_duration()
+            host_string = self._host_string(None)
+            msg, color = self._changed_or_not({}, host_string)
+            self._emit_line("%s | %s" % (msg, duration), color=color)
+            self.is_flush_handlers = False
+
         parentTask = task.get_first_parent_include()
         if parentTask is not None:
             if parentTask.action.endswith('tasks'):
@@ -269,6 +276,10 @@ class CallbackModule(CallbackBase):
                 self._open_section("  ↳ {}: {}".format(sectionName, task.name))
         else:
             self._open_section(task.get_name(), task.get_path())
+        
+        # Mark meta: flush_handlers as started
+        if task.action.endswith('.meta') and hasattr(task, 'args') and task.args.get('_raw_params') == 'flush_handlers':
+            self.is_flush_handlers = True
 
     def _open_section(self, section_name, path=None):
         self.task_started = datetime.now()
@@ -326,13 +337,21 @@ class CallbackModule(CallbackBase):
 
     @staticmethod
     def _host_string(result):
-        delegated_vars = result._result.get('_ansible_delegated_vars', None)
+        delegated_vars = None
+        if result:
+            delegated_vars = result._result.get('_ansible_delegated_vars', None)
 
         if delegated_vars:
-            host_string = "%s -> %s" % (
-                result._host.get_name(), delegated_vars['ansible_host'])
-        else:
+            if result:
+                host_string = "%s -> %s" % (
+                    result._host.get_name(), delegated_vars['ansible_host'])
+            else:
+                host_string = delegated_vars['ansible_host']
+        elif result:
             host_string = result._host.get_name()
+        
+        else:
+            host_string = 'localhost'
 
         return host_string
 
@@ -469,7 +488,7 @@ class CallbackModule(CallbackBase):
         super(CallbackModule, self).__init__(*args, **kwargs)
         self.task_started = datetime.now()
         self.task_start_preamble = None
-
+        self.is_flush_handlers = False
 
 if __name__ == '__main__':
     unittest.main()
